@@ -1,8 +1,8 @@
 
 
-# Code associated with: Modeling the competing effects of the immune system and EMT on tumor development
+# Modeling the competing effects of the immune system and EMT on tumor development
 
-This repository contains the code used for model development, simulation, and data analysis associated with the paper: https://doi.org/10.1101/615971
+This repository contains the code used for model development, simulation, and data analysis associated with the paper: https://doi.org/10.1101/615971.
 
 
 ## Citation
@@ -11,9 +11,8 @@ Daniel R Bergman, Matthew K Karikomi, Qing Nie, Adam L MacLean.  Modeling the co
 
 
 ## Contents
-
-This folder contains a number of instructive MATLAB implementations 
-for St
+- run model
+- analyze TCGA data
 
 
 ## Usage
