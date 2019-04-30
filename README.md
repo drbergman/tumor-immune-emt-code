@@ -19,10 +19,3 @@ We model immune cell populations as continuous variables (using differential equ
 - analyzedata/ contains the scripts (in R) required to query [TCGA](https://www.cancer.gov/about-nci/organization/ccg/research/structural-genomics/tcga) and perform data analysis.
 
 
-## Usage
-
-Follow these steps to run the model:
-
-1. Start MATLAB
-2. In MATLAB cd to the repository tumor-immune-emt-code/
-
