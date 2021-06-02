@@ -3,9 +3,9 @@ function [C,alive,Num,Mut,NK,CTL,Treg,TGFB,EMT,p_cell_mutate] = ...
 
 %% Build Probability Matrix
     p_apoptosis = pars.d_C*(1-pars.apop_down*(C(:,1)~=0));
-    p_NK_clearance = (any(C,2).*((NK/(Num/pars.K1+NK))*pars.E_NK*(1/(1+Treg/pars.K2)))).*...
+    p_NK_clearance  = ((1*any(C,2)+pars.E_NK_nonmut *~any(C,2)).*((NK /(Num/pars.K1+NK ))*pars.E_NK *(1/(1+Treg/pars.K2)))).*...
         (1-pars.mie*(EMT>pars.Mes_threshold)).*(1-pars.immune_evasion*(C(:,3)~=0));
-    p_CTL_clearance = (any(C,2).*((CTL/(Num/pars.K1+CTL))*pars.E_CTL*(1/(1+Treg/pars.K2)))).*...
+    p_CTL_clearance = ((1*any(C,2)+pars.E_CTL_nonmut*~any(C,2)).*((CTL/(Num/pars.K1+CTL))*pars.E_CTL*(1/(1+Treg/pars.K2)))).*...
         (1-pars.mie*(EMT>pars.Mes_threshold)).*(1-pars.immune_evasion*(C(:,3)~=0));
     p_proliferation = pars.p*(1+pars.prolif_up*(C(:,2)~=0)).*...
         (1-pars.mga*(EMT>pars.Mes_threshold))*pars.K0/(pars.K0+Num);
@@ -24,18 +24,23 @@ function [C,alive,Num,Mut,NK,CTL,Treg,TGFB,EMT,p_cell_mutate] = ...
     
 %% Immune clearance
     r = r - p_matrix(:,2);
-    NK_lysis = find((r<0) & (alive));
+    NK_lysis  = (r<0) & (alive);
     alive(NK_lysis) = false;
     r = r - p_matrix(:,3);
-    CTL_lysis = find((r<0) & (alive));
+    CTL_lysis = (r<0) & (alive);
     alive(CTL_lysis) = false;
+    
     
 %% Cell proliferation
     r = r - p_matrix(:,4);
     proliferate = find((r<0) & (alive));
     
-    NK = max(0,NK-length(NK_lysis));
-    CTL = max(0,CTL-length(CTL_lysis));
+    if NK<sum(NK_lysis) || CTL<sum(CTL_lysis)
+        disp('')
+    end
+    NK = max(0,NK-sum(NK_lysis));
+    CTL = max(0,CTL-sum(CTL_lysis));
+    activated_DC = sum((NK_lysis | CTL_lysis) & any(C,2));
 
 %% Mutation
     if ~isempty(proliferate)
@@ -66,7 +71,6 @@ function [C,alive,Num,Mut,NK,CTL,Treg,TGFB,EMT,p_cell_mutate] = ...
     
 %% Immune system update
     NK = (NK-pars.sigma_NK/pars.d_NK)*exp(-pars.d_NK*pars.t_step)+pars.sigma_NK/pars.d_NK;
-    activated_DC = length(NK_lysis)+length(CTL_lysis);
     CTL = (CTL-pars.sigma_CTL*activated_DC)*exp(-pars.d_CTL*pars.t_step)+...
         pars.sigma_CTL*activated_DC;
     treg_recruit = pars.sigma_Treg*TGFB/(1+TGFB/pars.K4);
