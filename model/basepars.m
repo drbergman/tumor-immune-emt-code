@@ -17,10 +17,20 @@ pars.K4 = 50;
 
 pars.E_NK_low = .2;
 pars.E_CTL_low = 4;
+pars.E_NK_nonmut = 0;
+pars.E_CTL_nonmut = .1;
+
+pars.E_NK_up = 3;
+pars.E_CTL_up = 3;
+pars.E_Treg_up = 200;
 
 pars.sigma_NK_low = 1.3;
 pars.sigma_CTL_low = 100;
 pars.sigma_Treg_low = 200;
+
+pars.sigma_NK_up = 1;
+pars.sigma_CTL_up = 1;
+pars.sigma_Treg_up = 1;
 
 pars.d_NK = .13;
 pars.d_CTL = pars.d_NK/5;
@@ -43,16 +53,6 @@ pars.Mes_threshold = .7;
 pars.p_mutation_start = 1e-2;
 pars.p_mutation_on = 1e-4;
 
-pars.NKeff_up = 3;
-pars.CTLeff_up = 3;
-pars.Tregeff_up = 200;
-
-pars.sigma_NK_up = 1;
-pars.sigma_CTL_up = 1;
-pars.sigma_Treg_up = 1;
-
 pars.Warmup = 1000;
 pars.Nmax = 400;
 pars.t_step = 1;
-
-
