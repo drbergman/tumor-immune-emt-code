@@ -1,0 +1,8 @@
+id	filename	md5	size	state
+194bb7a9-7b99-42c9-93de-ac77ff08b5f4	194bb7a9-7b99-42c9-93de-ac77ff08b5f4/unc.edu.7773fd96-8ab7-417b-befd-ea63dc596a7a.2032565.rsem.genes.normalized_results	fff5ba36c9ac97852781e23332878ca8	434577	validated
+850617da-9eae-4ac7-9148-777c4aba6b8f	850617da-9eae-4ac7-9148-777c4aba6b8f/unc.edu.c048b775-7679-424f-a008-8f7def9c0523.2503465.rsem.genes.normalized_results	859feb3bf9fa9007100f9aa28ab2c06d	434631	validated
+d62ee7fd-c989-422f-ae57-0ba858546287	d62ee7fd-c989-422f-ae57-0ba858546287/unc.edu.e7925508-8b2f-4c39-bd7a-033e78b1f875.1387986.rsem.genes.normalized_results	2ab65160085e825e57a28075c2ab498b	434156	validated
+de4c582f-3cce-4b68-b401-efcbe0716133	de4c582f-3cce-4b68-b401-efcbe0716133/unc.edu.b9f76fc8-ca33-46c5-89a0-ae16d42f987f.1114899.rsem.genes.normalized_results	cbcf63d2a37616745d20f42d1e28498e	434341	validated
+df9a3afd-3e50-49c7-b949-1eba359a7763	df9a3afd-3e50-49c7-b949-1eba359a7763/unc.edu.2c28e7b4-23b3-46b0-927b-c684d73d1543.2503388.rsem.genes.normalized_results	4ffca2a20dffc4c2673708dd920da8d7	435023	validated
+f6f2724d-d4d3-4932-ba41-96cdd49d1ce4	f6f2724d-d4d3-4932-ba41-96cdd49d1ce4/unc.edu.a5118740-bf71-47e8-a2e3-506792865c90.2090204.rsem.genes.normalized_results	fb654379d49a8c7adc3dd488aff490ed	433578	validated
+f9b70c07-5761-4590-9ff7-ca98bf28d382	f9b70c07-5761-4590-9ff7-ca98bf28d382/unc.edu.dafc2af2-7b91-45a4-ae67-fe22ab060f06.1475166.rsem.genes.normalized_results	3a582369be834fa19521d10cfaf3802b	435715	validated

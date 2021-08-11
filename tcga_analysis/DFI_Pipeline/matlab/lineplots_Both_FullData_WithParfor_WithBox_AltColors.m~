@@ -1,0 +1,721 @@
+% look at all the patients combined for the individual tumors, then get ARD
+% for all 45 mesen prolif genes for 100 resamplings of 100 BLCA and UCEC
+% patients
+
+clear;
+%mygenes = {'CTNNB1','CTNNBIP1','LRP5','WNT2','WNT11','WNT5A','FAT4','DCHS1','ZEB1','STAT1','BMP2','BMP4','BMP7','BMPR1A','FGF7','FGF9','FGFR1','FGFR2','MYC','FGFR1','FZD2','FZD4','FZD6','FZD8','ROR1','ROR2','RYK','LRP6'};
+%primarygenes = {'FZD2','FZD8','ROR1','ROR2','FAT4','DCHS1','ZEB1','STAT1','LRP5','LRP6'};
+%secondarygenes = {'WNT2','WNT11','WNT5A','FAT4','DCHS1','ZEB1','STAT1'};
+% primarygenes = {'CTNNB1','CTNNBIP1','LRP5','WNT2','WNT11','WNT5A','FAT4','DCHS1','ZEB1','STAT1','BMP2','BMP4','BMP7','BMPR1A','FGF7','FGF9','FGFR1','FGFR2','MYC','FGFR1','FZD2','FZD4','FZD6','FZD8','ROR1','ROR2','RYK','LRP6'};
+% secondarygenes = {'CTNNB1','CTNNBIP1','LRP5','WNT2','WNT11','WNT5A','FAT4','DCHS1','ZEB1','STAT1','BMP2','BMP4','BMP7','BMPR1A','FGF7','FGF9','FGFR1','FGFR2','MYC','FGFR1','FZD2','FZD4','FZD6','FZD8','ROR1','ROR2','RYK','LRP6'};
+
+primarygenes = {}; % set these to empty to do all combinations of genes (set on line 71 and 348)
+secondarygenes = {};
+
+% look at all the patients combined for the individual tumors, then get ARD
+% for all 45 mesen prolif genes for 100 resamplings of 100 BLCA and UCEC
+% patients
+startup
+seed = 1234;
+
+
+% the number of patients in a bootstrap sample
+skipticks = 2;
+axFont=8;
+legFont=8;
+labFont=8;
+s = RandStream('mlfg6331_64');
+optmeth = @fminunc;
+%optmeth = @fminscg;
+basetolf = 1e-3;
+basetolx = 1e-3;
+jitterbase = 1e-9;
+msiginit = 1e-9;
+maglinit = 1e-9;
+cminit = 1e-1; % initial value for constant kernel
+shinit = 3;% encourage large values for the length scales
+sinit = 0.5;
+m_shinit = 1;% encourage small values for the magnitude
+m_isinit = 10;
+cmsh = 1; % gamma prior on constant kernel, encourage small values
+cmis = 10;
+maxiter = 100;
+maxfevals = 50;
+mycantypes = [1,3];
+zlimit=1.282; % 0.675 75th, 1.282 90th, 1.645 95th
+
+
+
+plotdir = '../Lineplots/';
+
+nGrid = 16; % the number of grid points for primary and secondary genes
+nColorLevels = 64; % the number of color levels for each class. e.g. p(DFI_high=1) in [0:1/nColorLevels:1]
+
+
+if ~isdeployed
+    addpath("../DataTables/")
+end
+
+mkdir(plotdir);
+rootdir = [plotdir,'lineplots_FullData_WithParfor_WithBox_AltColors_' num2str(nGrid) '_'];
+metadata = readtable("../DataTables/Prolif_acc_AddRecGene.txt", 'ReadRowNames', false, 'Delimiter', '\t');
+
+mkdir('tmp')
+tumors = struct();
+
+for i = 1:size(metadata,1)
+    if ismember(i,mycantypes)
+        outputdir = [rootdir metadata.tumor_type{i} '/'];
+        mkdir(outputdir);
+    
+        fngene = which(metadata.fname_expression_genes{i});
+        fnexpr = which(metadata.fname_expression{i});
+
+        opts = detectImportOptions(fngene);
+        genelist = readtable(fngene, opts);
+        
+        if(length(primarygenes) == 0)
+            primarygenes = genelist.colnames';
+        end
+        
+        if(length(secondarygenes) == 0)
+            secondarygenes = genelist.colnames';
+        end
+
+        data_expr = readtable(fnexpr, opts);
+
+        data_expr.Properties.VariableNames = genelist.colnames;
+        writetable(data_expr, 'tmp/table.txt')
+        opts = detectImportOptions('tmp/table.txt');
+        opts = setvartype(opts,genelist.colnames,...
+                            genelist.datatypes);
+        data_expr = readtable('tmp/table.txt', opts);
+
+        data_expr_vals = data_expr;
+
+        data_expr_vals = removevars(data_expr_vals,{'barcode', 'dfi'});
+
+        x = table2array(data_expr_vals);
+        Y = data_expr.dfi;   
+
+        N = size(x, 1);
+        M = size(x, 2);
+
+        tumors(i).type = metadata.tumor_type(i);
+        tumors(i).patients = data_expr.barcode;
+
+        ard = zeros(N,1); % for each bootstrap sample the ard value for each gene
+
+        tumors(i).genes = data_expr_vals.Properties.VariableNames; % the gene names for the data
+        negLL = 0;
+
+        [XN, XMEAN, XSTD] = normdata(x);
+        [n, m]=size(XN);
+
+
+        nonWntIdx = find(contains(genelist.colnames,{'MSX','SOX','VEGF','FBX','IHH','PHF','SHOX',...
+                                                     'FGF','LMNA','SMO','IRS','PRRX','FOX','SIX','MYC','BMP',...
+                                                     'NFIB','TGFB','PDGF','TBX','OSR','HAND','PTN','DCHS',...
+                                                     'ZEB','SHH','FAT','CHRD','STAT','GPC3'}));
+        wnt2Index = find(contains(genelist.colnames, {'WNT2','FZD','CTNNB','LRP'}));
+        wnt11Index = find(contains(genelist.colnames, {'WNT11','FZD','CTNNB','LRP'}));
+        wnt5aIndex = find(contains(genelist.colnames, {'WNT5A','LRP','ROR','RYK'}));
+
+        gpcf_c = gpcf_constant('constSigma2',cminit);
+        gpcf_all = gpcf_sexp('lengthScale', ones(1,m).*maglinit, 'magnSigma2', msiginit);        
+        gpcf = gpcf_sexp('selectedVariables', nonWntIdx,'lengthScale', ones(1,length(nonWntIdx)).*maglinit, 'magnSigma2', msiginit);        
+        gpcf_wnt2 = gpcf_sexp('selectedVariables', wnt2Index,'lengthScale', ones(1,length(wnt2Index)).*maglinit, 'magnSigma2', msiginit);%WNT2,LRP5,LRP6,'CTNNB1','CTNNBIP1','FZD2','FZD4','FZD6','FZD8'
+        gpcf_wnt5a = gpcf_sexp('selectedVariables', wnt5aIndex,'lengthScale', ones(1,length(wnt5aIndex)).*maglinit, 'magnSigma2', msiginit);%WNT5A,LRP5,LRP6,'FZD2','FZD4','FZD6','FZD8','ROR1','ROR2','RYK'
+        gpcf_wnt11 = gpcf_sexp('selectedVariables', wnt11Index,'lengthScale', ones(1,length(wnt11Index)).*maglinit, 'magnSigma2', msiginit);%WNT11,LRP5,LRP6,'FZD2','FZD4','FZD6','FZD8','ROR1','ROR2','RYK'
+
+
+        gpcf_c = gpcf_constant(gpcf_c,'constSigma2_prior',prior_gaussian('s2',0.1));
+        gpcf_all = gpcf_sexp(gpcf_all, 'magnSigma2_prior',prior_gaussian('mu',1,'s2',0.25),'lengthScale_prior',prior_gaussian('mu',1,'s2_prior',prior_invgamma('sh',3,'s',1))); %
+        gpcf = gpcf_sexp(gpcf, 'magnSigma2_prior',prior_gaussian('mu',1,'s2',0.25),'lengthScale_prior',prior_gaussian('mu',1,'s2_prior',prior_invgamma('sh',3,'s',1))); %
+        gpcf_wnt2 = gpcf_sexp(gpcf_wnt2, 'magnSigma2_prior',prior_gaussian('mu',1,'s2',0.25),'lengthScale_prior',prior_gaussian('mu',1,'s2_prior',prior_invgamma('sh',3,'s',1))); %
+        gpcf_wnt5a = gpcf_sexp(gpcf_wnt5a, 'magnSigma2_prior',prior_gaussian('mu',1,'s2',0.25),'lengthScale_prior',prior_gaussian('mu',1,'s2_prior',prior_invgamma('sh',3,'s',1))); %
+        gpcf_wnt11 = gpcf_sexp(gpcf_wnt11, 'magnSigma2_prior',prior_gaussian('mu',1,'s2',0.25),'lengthScale_prior',prior_gaussian('mu',1,'s2_prior',prior_invgamma('sh',3,'s',1))); %
+
+
+        lik = lik_logit();
+%                gp = gp_set('lik', lik, 'cf', {gpcf_c,gpcf_all,gpcf_wnt2,gpcf_wnt5a,gpcf_wnt11},'latent_method', 'EP', 'jitterSigma2', jitterbase); 
+        gp = gp_set('lik', lik, 'cf', {gpcf_c,gpcf_all},'latent_method', 'EP', 'jitterSigma2', jitterbase); 
+%                gp = gp_set('lik', lik, 'cf', {gpcf_all},'latent_method', 'EP', 'jitterSigma2', jitterbase); 
+
+        opt=optimset('TolFun',basetolf,'TolX',basetolx,'MaxIter',maxiter,'MaxFunEvals',maxfevals,'Display','iter','Algorithm','quasi-newton');
+        gp=gp_optim(gp,XN,Y,'opt',opt,'optimf',optmeth);
+
+        [EFT, VARFT, lploo, EYT, VARYT] = gpep_loopred(gp,XN,Y);
+
+        looPreds = (exp(lploo) > 0.5).*2-1;
+        naivePreds = ones(length(Y),1);
+        looAcc = sum(abs((looPreds + Y)./2))/length(Y)
+        naiveAcc = sum(abs((naivePreds + Y)./2))/length(Y)
+        AccDiff = looAcc-naiveAcc;
+
+        fprintf('\n constant sigma \n')
+        exp(gp.cf{1}.constSigma2)
+        fprintf('\n ard sigma \n')
+        exp(gp.cf{2}.magnSigma2)
+        fprintf('\n ard ls \n')
+        format long
+        exp(gp.cf{2}.lengthScale) - min(exp(gp.cf{2}.lengthScale))        
+        tumors(i).ard = gp.cf{2}.lengthScale;
+        gp_packed = gp_pak(gp);
+        
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        %
+        % Monitor parfor progress
+        %
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        ppm = ParforProgressbar(M);
+        parfor primary = 1:M
+            pgene = tumors(i).genes{primary}; % name of primary gene
+            if any(strcmp(primarygenes,pgene))
+        
+            mkdir([outputdir pgene '/']);
+
+            for secondary = 1:M
+                sgene = tumors(i).genes{secondary}; % name of primary gene
+                if any(strcmp(secondarygenes,sgene)) && primary ~= secondary
+                if ~isfile([outputdir pgene '/' sgene '.pdf'])
+                    %% grid data
+                    allgenesMean = repmat(feval('mean',XN), nGrid, 1); % set all genes to mean value across patients
+                    allgenesMean(allgenesMean<1e-14)=0; % centered means should be zero
+
+                    primaryGrid = linspace(min(XN(:,primary)),max(XN(:,primary)),nGrid);
+                    secondaryGrid = linspace(min(XN(:,secondary)),max(XN(:,secondary)),nGrid);
+                    secondaryGrid = flip(secondaryGrid); % we fill the p table from top to bottom
+
+                    gridVariance = zeros(nGrid); % a matrix to store the conditional variance
+                    gridProbs = zeros(nGrid); % a matrix to store the conditional probs
+                    gridAcc = zeros(nGrid,1); % this is always the same, but useful for debug
+                    gridNaiveAcc = zeros(nGrid,1);
+                    for jj = 1:nGrid
+                        % paranoid
+                        primaryGrid = linspace(min(XN(:,primary)),max(XN(:,primary)),nGrid);
+                        secondaryGrid = linspace(min(XN(:,secondary)),max(XN(:,secondary)),nGrid);
+                        secondaryGrid = flip(secondaryGrid); % we fill the p table from top to bottom
+                        
+                        gp_grid = gp_set();
+                        gp_grid = gp_unpak(gp_grid,gp_packed);
+                        
+                        allgenes = allgenesMean;
+                        allgenes(:,primary) = primaryGrid;
+                        allgenes(:,secondary) = repmat(secondaryGrid(jj),nGrid,1);
+                        [Eft_la, Varft_la, lpyt_la, Eyt_la, Varyt_la] = ...
+                            gp_pred(gp_grid, XN, Y, allgenes, 'yt', ones(nGrid,1) ); % estimate conditionals for the jj'th case
+                        gridProbs(jj,:) = lpyt_la
+                        gridVariance(jj,:) = Varft_la;
+                        fprintf(['\n estimated gridval ' num2str(jj) ' of ' num2str(nGrid) '\n'])
+                    end
+
+                    denormPrimaryGrid = denormdata(primaryGrid,XMEAN(primary),XSTD(primary));
+                    denormSecondaryGrid = denormdata(secondaryGrid,XMEAN(secondary),XSTD(secondary));
+
+                    f = figure('visible','off');
+
+                    tt = tiledlayout(1,3,'Padding','normal');
+                    %axes('Units', 'normalized', 'Position', [0 0 1 1])
+                    
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% Draw Variance
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%            
+
+                    fh2=nexttile;
+                    primaryRep = repmat(denormPrimaryGrid',1,nGrid)';
+                    secondaryRep = flipud(repmat(denormSecondaryGrid',1,nGrid)); % for surf to work, the top of this matrix is the origin orthogonal to X... ¯\(°_o)/¯
+                    
+                    sp2 = pcolor(primaryRep,secondaryRep,flipud(gridVariance));
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% Assign colors
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    mapVars = brewermap(50,'Greens');
+                    colormap(fh2,mapVars);
+                    axis square;
+
+                    xlabel(['Log(' tumors(i).genes{primary} ')'],'FontSize',labFont);
+                    ylabel(['Log(' tumors(i).genes{secondary} ')'],'FontSize',labFont);   
+                    zlabel('Var(f) ','FontSize',labFont);
+                    view(2);
+                    ga = gca; ga.FontSize=axFont;
+
+                    cb1 = colorbar('southoutside');
+                                    axis tight;
+                    hold on;
+                    
+                    yhigh = find(Y>0);
+                    ylow = find(Y<0);
+                    overlayDenorm = [denormdata(XN(:,primary),XMEAN(primary),XSTD(primary)),denormdata(XN(:,secondary),XMEAN(secondary),XSTD(secondary))];
+                    sc2 = scatter(overlayDenorm(yhigh,1),overlayDenorm(yhigh,2),...
+                                    5,'o', ...
+                                    'MarkerFaceColor', 'black', ...
+                                    'MarkerEdgeColor', 'black');
+                    sc2 = scatter(overlayDenorm(ylow,1),overlayDenorm(ylow,2),...
+                                    5,'o', ...
+                                    'MarkerFaceColor', 'red', ...
+                                    'MarkerEdgeColor', 'red');
+                    axis square;
+
+                    
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% discretize the 2D X'th percentile interval on the data
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    % first, we need to make sure that the min/max value for primary/secondary is actually within the 2xsd bounding region
+                    % if not then we need to truncate the bounding region so that it fits
+                    if XMEAN(primary)-zlimit*XSTD(primary) >= min(x(:,primary))
+                        leftx = XMEAN(primary)-zlimit*XSTD(primary);
+                    else
+                        leftx = min(x(:,primary));
+                    end
+                    if XMEAN(secondary)-zlimit*XSTD(secondary) >= min(x(:,secondary))
+                        lefty = XMEAN(secondary)-zlimit*XSTD(secondary);
+                    else
+                        lefty = min(x(:,secondary));
+                    end
+                    if XMEAN(primary)+zlimit*XSTD(primary) <= max(x(:,primary))
+                        rightx = XMEAN(primary)+zlimit*XSTD(primary);
+                    else
+                        rightx = max(x(:,primary));
+                    end
+                    if XMEAN(secondary)+zlimit*XSTD(secondary) <= max(x(:,secondary))
+                        righty = XMEAN(secondary)+zlimit*XSTD(secondary);
+                    else
+                        righty = max(x(:,secondary));
+                    end
+                    
+                    flippedSecondary = flip(denormSecondaryGrid);
+                    xstart=discretize(leftx,denormPrimaryGrid,'IncludedEdge','left');
+                    xstop=discretize(rightx,denormPrimaryGrid,'IncludedEdge','left');
+                    ystart=discretize(lefty,flippedSecondary,'IncludedEdge','left');
+                    ystop=discretize(righty,flippedSecondary,'IncludedEdge','left');
+                    discXstart = denormPrimaryGrid(xstart);
+                    discXstop = denormPrimaryGrid(xstop);
+                    discYstart = flippedSecondary(ystart);
+                    discYstop = flippedSecondary(ystop);
+                    
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% Draw X'th percentile CI box on Vars
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%     
+                    corners = [discXstart,discYstart;discXstop,discYstop];
+                    rectangle('LineStyle','--','EdgeColor','cyan','LineWidth',2,...
+                        'Position',[discXstart,discYstart,discXstop-discXstart,discYstop-discYstart]);
+                    
+
+                    
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% Draw Probs
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%            
+
+                    fh1=nexttile;
+                    primaryRep = repmat(denormPrimaryGrid',1,nGrid)';
+                    secondaryRep = flipud(repmat(denormSecondaryGrid',1,nGrid)); % for surf to work, the top of this matrix is the origin orthogonal to X... ¯\(°_o)/¯
+
+                    sp1 = pcolor(primaryRep,secondaryRep,flipud(gridProbs));
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% Assign colors
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    mapProb = brewermap(50,'*RdYlBu');
+                    colormap(fh1,mapProb);
+                    probLims = caxis;
+                    axis square;
+
+                    xlabel(['Log(' tumors(i).genes{primary} ')'],'FontSize',labFont);
+                    ylabel(['Log(' tumors(i).genes{secondary} ')'],'FontSize',labFont);    
+                    zlabel('p High-DFI ','FontSize',labFont);
+                    view(2);
+                    %colormap(f,brewermap([],'Blues'));
+                    ga = gca; ga.FontSize=axFont;
+                    hold on;
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% Draw X'th percentile CI box on Vars
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%     
+                    rectangle('LineStyle','--','EdgeColor','cyan','LineWidth',2,...
+                        'Position',[discXstart,discYstart,discXstop-discXstart,discYstop-discYstart]);
+                    
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% Draw line for left approximation of secondary gene along left approx bounding primary gene values
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%     
+                    rectslope = (discYstop-discYstart)/(discXstop-discXstart); 
+                    xstepsize = denormPrimaryGrid(xstart+1)-denormPrimaryGrid(xstart);
+                    xexact = denormPrimaryGrid(xstart:xstop)';
+                    yexact = ([0:xstop-xstart]*xstepsize*rectslope)'+lefty;
+                    xapprox = xexact;
+                    xdiscrete = discretize(xapprox,denormPrimaryGrid);
+                    ydiscrete = discretize(yexact,flippedSecondary);
+                    yapprox = flippedSecondary(ydiscrete)';
+                    line(xapprox,yapprox,'Color',[.5 0 .5],'LineWidth',3,'LineStyle','--');
+                    
+                    
+                    axis square;
+                    
+                    cb1 = colorbar('southoutside');
+
+                    
+                    
+                    %% actual data
+
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% line plot for the slice
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    fl1=nexttile;
+
+                    % the y secondary grid values (needed to be flipped for previous discretization)
+                    flipInd = nGrid:-1:1;
+                    ydiscreteFlipped = flipInd(ydiscrete)';
+                    gridProbs2 = gridProbs;
+                    indgridprobs = sub2ind(size(gridProbs),ydiscreteFlipped,xdiscrete);
+                    probf = gridProbs(indgridprobs);
+                    interpf = interp1(denormPrimaryGrid(xdiscrete),probf,linspace(leftx,rightx),'pchip');
+                    plot(linspace(leftx,rightx),interpf,'LineWidth',2,'Color',[.5 0 .5]);
+                    axis square;
+                    
+                    ga = gca; ga.FontSize=axFont;
+                    ylabel('p(high-DFI)','FontSize',labFont)
+                    xlabel(['Log expression of ' tumors(i).genes{primary}],'FontSize',labFont);
+                    export_fig([outputdir pgene '/' sgene '.pdf']);
+                end
+                end
+            end
+            end
+            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+            %
+            % Report Progress
+            %
+            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+            ppm.increment();
+        end
+        delete(ppm);
+    end
+end    
+save([outputdir 'meta.mat'],'tumors');
+path = matlab.desktop.editor.getActiveFilename;
+copyfile(path, outputdir)
+clear gp_grid gp_upper gp_lower
+
+
+%% run additive model
+rootdir = [plotdir,'lineplots_FullData_WithParfor_WithBox_AltColors_ADDITIVE_' num2str(nGrid) '_'];
+mkdir('tmp')
+tumors = struct();
+
+for i = 1:size(metadata,1)
+    if ismember(i,mycantypes)
+        outputdir = [rootdir metadata.tumor_type{i} '/'];
+        mkdir(outputdir);
+    
+        fngene = which(metadata.fname_expression_genes{i});
+        fnexpr = which(metadata.fname_expression{i});
+
+        opts = detectImportOptions(fngene);
+        genelist = readtable(fngene, opts);
+
+        if(length(primarygenes) == 0)
+            primarygenes = genelist.colnames';
+        end
+        
+        if(length(secondarygenes) == 0)
+            secondarygenes = genelist.colnames';
+        end
+        
+        data_expr = readtable(fnexpr, opts);
+
+        data_expr.Properties.VariableNames = genelist.colnames;
+        writetable(data_expr, 'tmp/table.txt')
+        opts = detectImportOptions('tmp/table.txt');
+        opts = setvartype(opts,genelist.colnames,...
+                            genelist.datatypes);
+        data_expr = readtable('tmp/table.txt', opts);
+
+        data_expr_vals = data_expr;
+
+        data_expr_vals = removevars(data_expr_vals,{'barcode', 'dfi'});
+
+        x = table2array(data_expr_vals);
+        Y = data_expr.dfi;   
+
+        N = size(x, 1);
+        M = size(x, 2);
+
+        tumors(i).type = metadata.tumor_type(i);
+        tumors(i).patients = data_expr.barcode;
+
+        ard = zeros(N,1); % for each bootstrap sample the ard value for each gene
+
+        tumors(i).genes = data_expr_vals.Properties.VariableNames; % the gene names for the data
+        negLL = 0;
+
+        [XN, XMEAN, XSTD] = normdata(x);
+        [n, m]=size(XN);
+
+
+        nonWntIdx = find(contains(genelist.colnames,{'MSX','SOX','VEGF','FBX','IHH','PHF','SHOX',...
+                                                     'FGF','LMNA','SMO','IRS','PRRX','FOX','SIX','MYC','BMP',...
+                                                     'NFIB','TGFB','PDGF','TBX','OSR','HAND','PTN','DCHS',...
+                                                     'ZEB','SHH','FAT','CHRD','STAT','GPC3'}));
+        wnt2Index = find(contains(genelist.colnames, {'WNT2','FZD','CTNNB','LRP'}));
+        wnt11Index = find(contains(genelist.colnames, {'WNT11','FZD','CTNNB','LRP'}));
+        wnt5aIndex = find(contains(genelist.colnames, {'WNT5A','LRP','ROR','RYK'}));
+
+        gpcf_c = gpcf_constant('constSigma2',cminit);
+        gpcf_all = gpcf_sexp('lengthScale', ones(1,m).*maglinit, 'magnSigma2', msiginit);        
+        gpcf = gpcf_sexp('selectedVariables', nonWntIdx,'lengthScale', ones(1,length(nonWntIdx)).*maglinit, 'magnSigma2', msiginit);        
+        gpcf_wnt2 = gpcf_sexp('selectedVariables', wnt2Index,'lengthScale', ones(1,length(wnt2Index)).*maglinit, 'magnSigma2', msiginit);%WNT2,LRP5,LRP6,'CTNNB1','CTNNBIP1','FZD2','FZD4','FZD6','FZD8'
+        gpcf_wnt5a = gpcf_sexp('selectedVariables', wnt5aIndex,'lengthScale', ones(1,length(wnt5aIndex)).*maglinit, 'magnSigma2', msiginit);%WNT5A,LRP5,LRP6,'FZD2','FZD4','FZD6','FZD8','ROR1','ROR2','RYK'
+        gpcf_wnt11 = gpcf_sexp('selectedVariables', wnt11Index,'lengthScale', ones(1,length(wnt11Index)).*maglinit, 'magnSigma2', msiginit);%WNT11,LRP5,LRP6,'FZD2','FZD4','FZD6','FZD8','ROR1','ROR2','RYK'
+
+
+        gpcf_c = gpcf_constant(gpcf_c,'constSigma2_prior',prior_gaussian('s2',0.1));
+        gpcf_all = gpcf_sexp(gpcf_all, 'magnSigma2_prior',prior_gaussian('mu',1,'s2',0.25),'lengthScale_prior',prior_gaussian('mu',1,'s2_prior',prior_invgamma('sh',3,'s',1))); %
+        gpcf = gpcf_sexp(gpcf, 'magnSigma2_prior',prior_gaussian('mu',1,'s2',0.25),'lengthScale_prior',prior_gaussian('mu',1,'s2_prior',prior_invgamma('sh',3,'s',1))); %
+        gpcf_wnt2 = gpcf_sexp(gpcf_wnt2, 'magnSigma2_prior',prior_gaussian('mu',1,'s2',0.25),'lengthScale_prior',prior_gaussian('mu',1,'s2_prior',prior_invgamma('sh',3,'s',1))); %
+        gpcf_wnt5a = gpcf_sexp(gpcf_wnt5a, 'magnSigma2_prior',prior_gaussian('mu',1,'s2',0.25),'lengthScale_prior',prior_gaussian('mu',1,'s2_prior',prior_invgamma('sh',3,'s',1))); %
+        gpcf_wnt11 = gpcf_sexp(gpcf_wnt11, 'magnSigma2_prior',prior_gaussian('mu',1,'s2',0.25),'lengthScale_prior',prior_gaussian('mu',1,'s2_prior',prior_invgamma('sh',3,'s',1))); %
+
+
+        lik = lik_logit();
+        gp = gp_set('lik', lik, 'cf', {gpcf_c,gpcf_all,gpcf_wnt2,gpcf_wnt5a,gpcf_wnt11},'latent_method', 'EP', 'jitterSigma2', jitterbase); 
+%        gp = gp_set('lik', lik, 'cf', {gpcf_c,gpcf_all},'latent_method', 'EP', 'jitterSigma2', jitterbase); 
+%                gp = gp_set('lik', lik, 'cf', {gpcf_all},'latent_method', 'EP', 'jitterSigma2', jitterbase); 
+
+        opt=optimset('TolFun',basetolf,'TolX',basetolx,'MaxIter',maxiter,'MaxFunEvals',maxfevals,'Display','iter','Algorithm','quasi-newton');
+        gp=gp_optim(gp,XN,Y,'opt',opt,'optimf',optmeth);
+
+        [EFT, VARFT, lploo, EYT, VARYT] = gpep_loopred(gp,XN,Y);
+
+        looPreds = (exp(lploo) > 0.5).*2-1;
+        naivePreds = ones(length(Y),1);
+        looAcc = sum(abs((looPreds + Y)./2))/length(Y)
+        naiveAcc = sum(abs((naivePreds + Y)./2))/length(Y)
+        AccDiff = looAcc-naiveAcc;
+
+        fprintf('\n constant sigma \n')
+        exp(gp.cf{1}.constSigma2)
+        fprintf('\n ard sigma \n')
+        exp(gp.cf{2}.magnSigma2)
+        fprintf('\n ard ls \n')
+        format long
+        exp(gp.cf{2}.lengthScale) - min(exp(gp.cf{2}.lengthScale))        
+        tumors(i).ard = gp.cf{2}.lengthScale;
+        gp_packed = gp_pak(gp);
+        
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        %
+        % Monitor parfor progress
+        %
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        ppm = ParforProgressbar(M);
+        parfor primary = 1:M
+            pgene = tumors(i).genes{primary}; % name of primary gene
+            if any(strcmp(primarygenes,pgene))
+
+            mkdir([outputdir pgene '/']);
+
+            for secondary = 1:M
+                sgene = tumors(i).genes{secondary}; % name of primary gene
+                if any(strcmp(secondarygenes,sgene)) && primary ~= secondary
+                if ~isfile([outputdir pgene '/' sgene '.pdf'])
+                    %% grid data
+                    allgenesMean = repmat(feval('mean',XN), nGrid, 1); % set all genes to mean value across patients
+                    allgenesMean(allgenesMean<1e-14)=0; % centered means should be zero
+
+                    primaryGrid = linspace(min(XN(:,primary)),max(XN(:,primary)),nGrid);
+                    secondaryGrid = linspace(min(XN(:,secondary)),max(XN(:,secondary)),nGrid);
+                    secondaryGrid = flip(secondaryGrid); % we fill the p table from top to bottom
+
+                    gridVariance = zeros(nGrid); % a matrix to store the conditional variance
+                    gridProbs = zeros(nGrid); % a matrix to store the conditional probs
+                    gridAcc = zeros(nGrid,1); % this is always the same, but useful for debug
+                    gridNaiveAcc = zeros(nGrid,1);
+                    for jj = 1:nGrid
+                        % paranoid
+                        primaryGrid = linspace(min(XN(:,primary)),max(XN(:,primary)),nGrid);
+                        secondaryGrid = linspace(min(XN(:,secondary)),max(XN(:,secondary)),nGrid);
+                        secondaryGrid = flip(secondaryGrid); % we fill the p table from top to bottom
+                        
+                        gp_grid = gp_set();
+                        gp_grid = gp_unpak(gp_grid,gp_packed);
+                        
+                        allgenes = allgenesMean;
+                        allgenes(:,primary) = primaryGrid;
+                        allgenes(:,secondary) = repmat(secondaryGrid(jj),nGrid,1);
+                        [Eft_la, Varft_la, lpyt_la, Eyt_la, Varyt_la] = ...
+                            gp_pred(gp_grid, XN, Y, allgenes, 'yt', ones(nGrid,1) ); % estimate conditionals for the jj'th case
+                        gridProbs(jj,:) = lpyt_la
+                        gridVariance(jj,:) = Varft_la;
+                        fprintf(['\n estimated gridval ' num2str(jj) ' of ' num2str(nGrid) '\n'])
+                    end
+
+                    denormPrimaryGrid = denormdata(primaryGrid,XMEAN(primary),XSTD(primary));
+                    denormSecondaryGrid = denormdata(secondaryGrid,XMEAN(secondary),XSTD(secondary));
+
+                    f = figure('visible','off');
+
+                    tt = tiledlayout(1,3,'Padding','normal');
+                    %axes('Units', 'normalized', 'Position', [0 0 1 1])
+                    
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% Draw Variance
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%            
+
+                    fh2=nexttile;
+                    primaryRep = repmat(denormPrimaryGrid',1,nGrid)';
+                    secondaryRep = flipud(repmat(denormSecondaryGrid',1,nGrid)); % for surf to work, the top of this matrix is the origin orthogonal to X... ¯\(°_o)/¯
+                    
+                    sp2 = pcolor(primaryRep,secondaryRep,flipud(gridVariance));
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% Assign colors
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    mapVars = brewermap(50,'Greens');
+                    colormap(fh2,mapVars);
+                    axis square;
+
+                    xlabel(['Log(' tumors(i).genes{primary} ')'],'FontSize',labFont);
+                    ylabel(['Log(' tumors(i).genes{secondary} ')'],'FontSize',labFont);   
+                    zlabel('Var(f) ','FontSize',labFont);
+                    view(2);
+                    ga = gca; ga.FontSize=axFont;
+
+                    cb1 = colorbar('southoutside');
+                                    axis tight;
+                    hold on;
+                    
+                    yhigh = find(Y>0);
+                    ylow = find(Y<0);
+                    overlayDenorm = [denormdata(XN(:,primary),XMEAN(primary),XSTD(primary)),denormdata(XN(:,secondary),XMEAN(secondary),XSTD(secondary))];
+                    sc2 = scatter(overlayDenorm(yhigh,1),overlayDenorm(yhigh,2),...
+                                    5,'o', ...
+                                    'MarkerFaceColor', 'black', ...
+                                    'MarkerEdgeColor', 'black');
+                    sc2 = scatter(overlayDenorm(ylow,1),overlayDenorm(ylow,2),...
+                                    5,'o', ...
+                                    'MarkerFaceColor', 'red', ...
+                                    'MarkerEdgeColor', 'red');
+                    axis square;
+
+                                
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% Draw 90th CI box on Variance
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    % first, we need to make sure that the min/max value for primary/secondary is actually within the 2xsd bounding region
+                    % if not then we need to truncate the bounding region so that it fits
+                    if XMEAN(primary)-zlimit*XSTD(primary) >= min(x(:,primary))
+                        leftx = XMEAN(primary)-zlimit*XSTD(primary);
+                    else
+                        leftx = min(x(:,primary));
+                    end
+                    if XMEAN(secondary)-zlimit*XSTD(secondary) >= min(x(:,secondary))
+                        lefty = XMEAN(secondary)-zlimit*XSTD(secondary);
+                    else
+                        lefty = min(x(:,secondary));
+                    end
+                    if XMEAN(primary)+zlimit*XSTD(primary) <= max(x(:,primary))
+                        rightx = XMEAN(primary)+zlimit*XSTD(primary);
+                    else
+                        rightx = max(x(:,primary));
+                    end
+                    if XMEAN(secondary)+zlimit*XSTD(secondary) <= max(x(:,secondary))
+                        righty = XMEAN(secondary)+zlimit*XSTD(secondary);
+                    else
+                        righty = max(x(:,secondary));
+                    end
+                    corners = [leftx,lefty;rightx,righty];
+                    rectangle('LineStyle','--','EdgeColor','y','LineWidth',2,'Position',...
+                        [leftx,lefty,rightx-leftx,righty-lefty]);
+                    
+                    
+
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% Draw Probs
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%            
+
+                    fh1=nexttile;
+                    primaryRep = repmat(denormPrimaryGrid',1,nGrid)';
+                    secondaryRep = flipud(repmat(denormSecondaryGrid',1,nGrid)); % for surf to work, the top of this matrix is the origin orthogonal to X... ¯\(°_o)/¯
+
+                    sp1 = pcolor(primaryRep,secondaryRep,flipud(gridProbs));
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% Assign colors
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    mapProb = brewermap(50,'*RdYlBu');
+                    colormap(fh1,mapProb);
+                    probLims = caxis;
+                    axis square;
+
+                    xlabel(['Log(' tumors(i).genes{primary} ')'],'FontSize',labFont);
+                    ylabel(['Log(' tumors(i).genes{secondary} ')'],'FontSize',labFont);    
+                    zlabel('p High-DFI ','FontSize',labFont);
+                    view(2);
+                    %colormap(f,brewermap([],'Blues'));
+                    ga = gca; ga.FontSize=axFont;
+                    hold on;
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% Draw 90th CI box on Probs
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%            
+                    rectangle('LineStyle','--','EdgeColor','y','LineWidth',2,'Position',...
+                        [leftx,lefty,rightx-leftx,righty-lefty]);
+                    line(corners(:,1),corners(:,2),'Color',[.5 0 .5],'LineWidth',2,'LineStyle','--');
+                    axis square;
+                    
+                    cb1 = colorbar('southoutside');
+
+                    
+                    
+                    %% actual data
+
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% line plot for Min Variance Secondary
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    fl1=nexttile;
+
+                    xstepsize = mean(denormPrimaryGrid(2:end)-denormPrimaryGrid(1:end-1));
+                    ystepsize = mean(denormSecondaryGrid(2:end)-denormSecondaryGrid(1:end-1));
+                    xstart = min(find(leftx < denormdata(primaryGrid,XMEAN(primary),XSTD(primary))));
+                    xend = max(find(rightx > denormdata(primaryGrid,XMEAN(primary),XSTD(primary))));
+                    nxsteps = xend - xstart;
+                    rectslope = (righty-lefty)/(rightx-leftx); 
+                    ysteps = lefty+xstepsize*[1:nxsteps]*rectslope;
+                    xdiscrete = xstart:1:xend-1;
+                    ydiscrete = discretize(ysteps',flip(denormSecondaryGrid)','IncludedEdge','left');
+                    indgridprobs = sub2ind(size(gridProbs),xdiscrete,ydiscrete');
+                    probf = gridProbs(indgridprobs);
+                    interpf = interp1(denormPrimaryGrid(xdiscrete),probf,linspace(leftx,rightx),'pchip');
+
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+                    %%% bg color for the plot
+                    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+                    bgcols = repmat(linspace(min(interpf),max(interpf),20),[100,1])';
+%                     pcolor(bgcols)
+                    colormap(fl1,mapProb);
+                    caxis(fl1,probLims);
+                    hold on;
+                    
+                    plot(linspace(leftx,rightx),interpf,'LineWidth',2,'Color',[.5 0 .5]);
+                    axis square;
+
+                    ga = gca; ga.FontSize=axFont;
+
+                    ylabel('p(high-DFI)','FontSize',labFont)
+                    xlabel(['Log expression of ' tumors(i).genes{primary}],'FontSize',labFont);
+
+%                    exportgraphics(f,[outputdir pgene '/' sgene '.pdf'],'ContentType','vector');
+                    export_fig([outputdir pgene '/' sgene '.pdf']);
+                end
+                end
+            end
+            end
+            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+            %
+            % Report Progress
+            %
+            %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+            ppm.increment();
+        end
+        delete(ppm);
+    end
+end    
+save([outputdir 'meta.mat'],'tumors');
+path = matlab.desktop.editor.getActiveFilename;
+copyfile(path, outputdir)
+
